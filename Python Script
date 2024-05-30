@@ -1,0 +1,112 @@
+# Import the socket library to work with network connections
+import socket
+# Import the os library for operating system interactions, not used in this updated script
+import os
+# Import the ipaddress library to handle IP addresses
+import ipaddress
+# Import the struct library for packing and unpacking byte data
+import struct
+# Import PrettyTable for displaying tabular data in the console
+from prettytable import PrettyTable
+
+# Get the current computer's hostname
+hostname = socket.gethostname()
+# Resolve the current computer's IP address
+HOST = socket.gethostbyname(hostname)
+
+# Define a class to represent and parse IP headers
+class IP:
+    # Initialize the class with packet data
+    def __init__(self, buff=None):
+        # Unpack the first 20 bytes of the IP header
+        header = struct.unpack('<BBHHHBBH4s4s', buff)
+        # Extract the version from the first byte
+        self.ver = header[0] >> 4
+        # Extract the header length from the first byte
+        self.ihl = header[0] & 0xF
+        # Extract the type of service
+        self.tos = header[1]
+        # Extract the total length
+        self.len = header[2]
+        # Extract the identification
+        self.id = header[3]
+        # Extract the fragment offset
+        self.offset = header[4]
+        # Extract the time to live
+        self.ttl = header[5]
+        # Extract the protocol
+        self.protocol_num = header[6]
+        # Extract the checksum
+        self.sum = header[7]
+        # Extract the source IP address
+        self.src = header[8]
+        # Extract the destination IP address
+        self.dst = header[9]
+        # Convert source IP from binary to a human-readable format
+        self.src_address = ipaddress.ip_address(self.src)
+        # Convert destination IP from binary to a human-readable format
+        self.dst_address = ipaddress.ip_address(self.dst)
+        # A dictionary to map protocol numbers to their names
+        self.protocol_map = {1: "ICMP", 6: "TCP", 17: "UDP"}
+
+# The main function where execution begins
+def main():
+    # Set the protocol for the socket to IP
+    socket_protocol = socket.IPPROTO_IP
+    # Create a raw socket
+    sniffer = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket_protocol)
+    # Bind the socket to the host
+    sniffer.bind((HOST, 0))
+    # Set the socket option to include IP headers
+    sniffer.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
+    # Enable promiscuous mode to capture all packets
+    sniffer.ioctl(socket.SIO_RCVALL, socket.RCVALL_ON)
+
+    # Initialize a dictionary to track unique packet combinations
+    captureDict = {}
+    # Initialize a counter to track the number of processed packets
+    packet_count = 0
+
+    # Start capturing packets
+    try:
+        while True:
+            # Receive a packet
+            packet = sniffer.recvfrom(65565)
+            # Increment the processed packet count
+            packet_count += 1
+            # Extract the packet data
+            basePacket = packet[0]
+            # Extract the IP header from the packet data
+            pckHeader = basePacket[0:20]
+            # Parse the IP header
+            ipOBJ = IP(pckHeader)
+            # Determine the protocol name, defaulting to "Unknown" if not found
+            protocolName = ipOBJ.protocol_map.get(ipOBJ.protocol_num, "Unknown")
+            # Create a unique key for this packet combination
+            packetKey = (str(ipOBJ.src_address), str(ipOBJ.dst_address), protocolName)
+            # Increment the count for this packet combination in the capture dictionary
+            captureDict[packetKey] = captureDict.get(packetKey, 0) + 1
+
+            # Break the loop if 10,000 packets have been processed
+            if packet_count >= 10000:
+                print("Processed 10,000 packets.")
+                break
+
+    # Allow for graceful exit via keyboard interrupt (Ctrl+C)
+    except KeyboardInterrupt:
+        pass
+
+    # Prepare the PrettyTable for displaying results
+    tbl = PrettyTable(["Occurs", "SRC", "DST", "Protocol"])
+    # Populate the table with data from the capture dictionary
+    for key, value in captureDict.items():
+        tbl.add_row([value, key[0], key[1], key[2]])
+    # Print the table, sorted by occurrence count in descending order
+    print(tbl.get_string(sortby="Occurs", reversesort=True))
+
+    # Disable promiscuous mode
+    sniffer.ioctl(socket.SIO_RCVALL, socket.RCVALL_OFF)
+
+# Ensure the script runs only when executed directly (not when imported)
+if __name__ == '__main__':
+    main()
